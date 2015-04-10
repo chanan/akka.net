@@ -16,16 +16,16 @@ namespace PersistenceExample
     {
         static void Main(string[] args)
         {
-            var config = ConfigurationFactory.ParseString("akka.actor.logLevel = DEBUG")
+            var config = ConfigurationFactory.Load()
                 .WithFallback(Persistence.DefaultConfig());
 
             using (var system = ActorSystem.Create("example",  config))
             {
-                //BasicUsage(system);
+                BasicUsage(system);
 
                 // FailingActorExample(system);
 
-                SnapshotedActor(system);
+                // SnapshotedActor(system);
 
                 //ViewExample(system);
 
@@ -114,7 +114,7 @@ namespace PersistenceExample
             aref.Tell(new Command("bar"));
 
             // save current actor state using LocalSnapshotStore (it will be serialized and stored inside file on example bin/snapshots folder)
-            aref.Tell("snap");
+            //aref.Tell("snap");
 
             // add one more message, this one is not snapshoted and won't be persisted (because of MemoryJournal characteristics)
             aref.Tell(new Command("buzz"));
