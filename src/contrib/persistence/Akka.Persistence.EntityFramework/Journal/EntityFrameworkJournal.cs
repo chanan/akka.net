@@ -18,7 +18,7 @@ namespace Akka.Persistence.EntityFramework.Journal
 		}
 	}
 
-	internal class EntityFrameworkStore : ReceiveActor
+	internal class EntityFrameworkStore : ActorBase
 	{
 		private readonly JournalContext _context = new JournalContext();
 		private readonly Akka.Serialization.Serialization _serialization = Context.System.Serialization;
@@ -27,11 +27,21 @@ namespace Akka.Persistence.EntityFramework.Journal
 		public EntityFrameworkStore()
 		{
 			_serializer = _serialization.FindSerializerForType(typeof(IPersistentRepresentation));
-			Receive<AsyncWriteTarget.WriteMessages>(message => Add(message));
+			/*Receive<AsyncWriteTarget.WriteMessages>(message => Add(message));
 			Receive<AsyncWriteTarget.DeleteMessagesTo>(message => Delete(message));
 			Receive<AsyncWriteTarget.ReplayMessages>(message => Read(message));
 			Receive<AsyncWriteTarget.ReadHighestSequenceNr>(message => GetHighestSequenceNumber(message));
-			ReceiveAny(o => Unhandled(o));
+			ReceiveAny(o => Unhandled(o));*/
+		}
+
+		protected override bool Receive(object message)
+		{
+			if (message is AsyncWriteTarget.WriteMessages) Add(message as AsyncWriteTarget.WriteMessages);
+			else if (message is AsyncWriteTarget.DeleteMessagesTo) Delete(message as AsyncWriteTarget.DeleteMessagesTo);
+			else if (message is AsyncWriteTarget.ReplayMessages) Read(message as AsyncWriteTarget.ReplayMessages);
+			else if (message is AsyncWriteTarget.ReadHighestSequenceNr) GetHighestSequenceNumber(message as AsyncWriteTarget.ReadHighestSequenceNr);
+			else return false;
+			return true;
 		}
 
 		private void GetHighestSequenceNumber(AsyncWriteTarget.ReadHighestSequenceNr rhsn)
@@ -57,18 +67,19 @@ namespace Akka.Persistence.EntityFramework.Journal
 
 			foreach (var persistent in list.Take(replay.Max >= int.MaxValue ? int.MaxValue : (int)replay.Max))
 			{
-				Sender.Tell(persistent);
+				var p = PersistentFromByteBuffer(persistent.Payload);
+                Sender.Tell(p);
 			}
 			Sender.Tell(AsyncWriteTarget.ReplaySuccess.Instance);
 		}
 
-		private Task Delete(AsyncWriteTarget.DeleteMessagesTo deleteCommand)
+		private void Delete(AsyncWriteTarget.DeleteMessagesTo deleteCommand)
 		{
-			if (deleteCommand.IsPermanent) return DeletePermanent(deleteCommand);
-			return DeleteLogical(deleteCommand);
+			if (deleteCommand.IsPermanent) DeletePermanent(deleteCommand);
+			DeleteLogical(deleteCommand);
 		}
 
-		private Task DeleteLogical(AsyncWriteTarget.DeleteMessagesTo deleteCommand)
+		private void DeleteLogical(AsyncWriteTarget.DeleteMessagesTo deleteCommand)
 		{
 			var list = from message in _context.Messages
 					   where message.PersistentId == deleteCommand.PersistenceId
@@ -80,10 +91,10 @@ namespace Akka.Persistence.EntityFramework.Journal
 			{
 				persistent.Deleted = true;
 			}
-			return _context.SaveChangesAsync();
+			_context.SaveChanges();
 		}
 
-		private Task DeletePermanent(AsyncWriteTarget.DeleteMessagesTo deleteCommand)
+		private void DeletePermanent(AsyncWriteTarget.DeleteMessagesTo deleteCommand)
 		{
 			var list = from message in _context.Messages
 					   where message.PersistentId == deleteCommand.PersistenceId
@@ -93,22 +104,22 @@ namespace Akka.Persistence.EntityFramework.Journal
 
 			_context.Messages.RemoveRange(list);
 
-			return _context.SaveChangesAsync();
+			_context.SaveChanges();
 		}
 
-		private Task Add(AsyncWriteTarget.WriteMessages writeMessages)
+		private void Add(AsyncWriteTarget.WriteMessages writeMessages)
 		{
 			foreach (var persistent in writeMessages.Messages)
 			{
-				Message message = new Message();
+				var message = new Message();
 				message.PersistentId = persistent.PersistenceId;
 				message.SequenceNr = persistent.SequenceNr;
 				message.Payload = PersistentToByteBuffer(persistent);
 				message.Deleted = false;
 				_context.Messages.Add(message);
 			}
+			_context.SaveChanges();
 			Sender.Tell(new object());
-			return _context.SaveChangesAsync();
 		}
 
 		private Byte[] PersistentToByteBuffer(IPersistentRepresentation p)
